@@ -17,43 +17,59 @@ public class Main {
         JsonParser parser = new JsonParser();
         Scanner scanner = new Scanner(System.in);
 
-        // PHASE 1: DISCOVERY & FILTERING
+        // PHASE 1: DISCOVERY
         System.out.println(BLUE + "--- Fetching Live Matches ---" + RESET);
         String rawData = apiClient.fetchLiveScores();
         List<Match> allMatches = parser.parseMatches(rawData);
 
-        // Filter to show only matches that haven't ended yet [cite: 754]
+        // NULL SAFETY CHECK
+        if (allMatches == null || allMatches.isEmpty()) {
+            System.out.println(RED + "Error: No matches found. Check your API key or connection." + RESET);
+            return;
+        }
+
+        // FILTER LIVE MATCHES
         List<Match> liveOnly = allMatches.stream()
                 .filter(m -> !m.getStatus().toLowerCase().contains("won by") &&
                         !m.getStatus().toLowerCase().contains("drawn") &&
                         !m.getStatus().toLowerCase().contains("tied"))
                 .toList();
 
+        // FALLBACK IF NOTHING IS LIVE
+        List<Match> displayList = liveOnly.isEmpty() ? allMatches : liveOnly;
         if (liveOnly.isEmpty()) {
-            System.out.println(RED + "No matches are currently live. Showing recent results instead:" + RESET);
-            liveOnly = allMatches;
+            System.out.println(YELLOW + "No matches are currently live. Showing recent results:" + RESET);
         }
 
-        for (int i = 0; i < liveOnly.size(); i++) {
-            System.out.println((i + 1) + ". " + liveOnly.get(i).getName());
+        // DISPLAY LIST FOR SELECTION
+        for (int i = 0; i < displayList.size(); i++) {
+            System.out.println((i + 1) + ". " + displayList.get(i).getName());
         }
 
-        // --- FIXED: ADDED USER INPUT LOGIC ---
-        System.out.print("\nSelect a match number to follow live: ");
+        System.out.print("\nSelect a match number to follow: ");
         int choice = scanner.nextInt();
 
-        if (choice < 1 || choice > liveOnly.size()) {
+        if (choice < 1 || choice > displayList.size()) {
             System.out.println(RED + "Invalid selection. Exiting." + RESET);
             return;
         }
 
-        final Match selectedMatch = liveOnly.get(choice - 1);
+        // These must be 'final' or effectively final for the lambda below
+        final Match selectedMatch = displayList.get(choice - 1);
         final String selectedId = selectedMatch.getId();
 
-        // PHASE 2: DEDICATED TRACKING LOOP [cite: 718]
+        // PHASE 2: DEDICATED TRACKING LOOP
         ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+
+        // ADD SHUTDOWN HOOK FOR CLEAN EXIT
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println(YELLOW + "\nShutting down tracker. Happy Cricketing! 🏏" + RESET);
+            scheduler.shutdown();
+        }));
+
         scheduler.scheduleAtFixedRate(() -> {
             try {
+                // Clear console
                 System.out.print("\033[H\033[2J");
                 System.out.flush();
 
@@ -64,10 +80,12 @@ public class Main {
                 String latestData = apiClient.fetchLiveScores();
                 List<Match> updatedMatches = parser.parseMatches(latestData);
 
-                updatedMatches.stream()
-                        .filter(m -> m.getId().equals(selectedId))
-                        .findFirst()
-                        .ifPresent(Main::displayMatchDashboard);
+                if (updatedMatches != null) {
+                    updatedMatches.stream()
+                            .filter(m -> m.getId().equals(selectedId))
+                            .findFirst()
+                            .ifPresent(Main::displayMatchDashboard);
+                }
 
                 System.out.println("\nAuto-refreshing in 30 seconds...");
                 System.out.println("Press Ctrl+C to stop following.");
